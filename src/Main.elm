@@ -1,124 +1,108 @@
-port module Main exposing (main)
+module Main exposing (..)
 
-import Html exposing (Html, a, button, div, h1, img, li, p, text, ul)
-import Html.Attributes exposing (href, src)
-import Html.Events exposing (onClick)
-import Navigation as Nav
-import List.Extra exposing (find)
-import WrapidLogo exposing (logo)
-import Maybe exposing (andThen)
-
-
-main : Program Never Model Msg
-main =
-    Nav.program UrlChange
-        { init = init
-        , view = view
-        , update = update
-        , subscriptions = (\_ -> Sub.none)
-        }
-
+import Html exposing (..)
+import Login as Login
+import Login exposing (OutMsg(..))
+import Wizard as Wizard
+import Material
+import Material.Scheme as Scheme
+import Material.Options as Options
 
 
 -- MODEL
 
 
 type alias Model =
-    { history : List Nav.Location
-    , profiles : List Profile
-    , currentImg : Maybe String
+    { loginModel : Login.Model
+    , wizardModel : Wizard.Model
     }
 
 
-type alias Url =
-    String
-
-
-type alias Profile =
-    { id : String
-    , firstName : String
-    , url : Maybe String
+model : Model
+model =
+    { loginModel = Login.init
+    , wizardModel = Wizard.initEmpty
     }
 
 
-init : Nav.Location -> ( Model, Cmd Msg )
-init location =
-    ( Model [ location ] [] Nothing
-    , Cmd.none
-    )
 
-
-
--- UPDATE
+-- ACTION, UPDATE
 
 
 type Msg
-    = UrlChange Nav.Location
-    | ShowAvatar String
+    = LoginMsg Login.Msg
+    | WizardMsg Wizard.Msg
+
+
+
+-- qualify as Child.OutMsg when
+-- multiple child components expose OutMsg
+
+
+processSignal : Login.OutMsg -> Model -> ( Model, Cmd Msg )
+processSignal signal model =
+    case Debug.log "Child Message: " signal of
+        NoSignal ->
+            ( model, Cmd.none )
+
+        Next ->
+            ( { model | wizardModel = Wizard.init }, Cmd.none )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        UrlChange location ->
-            ( { model | history = location :: model.history }
-            , Cmd.none
-            )
+    let
+        _ =
+            Debug.log "model: " msg
+    in
+        case Debug.log "parent msg: " msg of
+            LoginMsg subMsg ->
+                let
+                    ( updatedLoginModel, loginCmd, signalForParent ) =
+                        Login.update subMsg model.loginModel
+
+                    -- model should be up to date
+                    ( newModel, cmdsFromSignal ) =
+                        processSignal
+                            signalForParent
+                            { model | loginModel = updatedLoginModel }
+                in
+                    ( newModel
+                    , Cmd.batch
+                        [ Cmd.map LoginMsg loginCmd
+                        , cmdsFromSignal
+                        ]
+                    )
+
+            WizardMsg subMsg ->
+                let
+                    ( updatedWizardModel, wizardCmd ) =
+                        Wizard.update subMsg model.wizardModel
+                in
+                    ( { model | wizardModel = updatedWizardModel }
+                    , Cmd.map WizardMsg wizardCmd
+                    )
 
 
-        ShowAvatar id ->
-            let
-                clickedUser =
-                    find (\usr -> usr.id == id) model.profiles
 
-                url =
-                    andThen .url clickedUser
-            in
-                ( { model | currentImg = url }
-                , Cmd.none
-                )
-
-
-
--- VIEW
+-- View
 
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ logo
-        , h1 [] [ text "Pages" ]
-        , ul [] (List.map viewLink [ "bears", "cats", "dogs", "elephants", "fish" ])
-        , h1 [] [ text "History" ]
-        , ul [] (List.map viewLocation model.history)
-        , h1 [] [ text "Data" ]
-        , viewAvatar model.currentImg
-        ]
+    Scheme.top <|
+        Options.div
+            [ Options.center ]
+            [ Html.map LoginMsg (Login.view model.loginModel)
+            , Html.map WizardMsg (Wizard.view model.wizardModel)
+            ]
 
 
-viewLink : String -> Html msg
-viewLink name =
-    li [] [ a [ href ("#" ++ name) ] [ text name ] ]
-
-
-viewLocation : Nav.Location -> Html msg
-viewLocation location =
-    li [] [ text (location.pathname ++ location.hash) ]
-
-
-
-viewAvatar : Maybe String -> Html msg
-viewAvatar url =
-    case url of
-        Nothing ->
-            text ""
-
-        Just loc ->
-            img [ src loc ] []
-
-
-
--- PORTS
-
-
--- SUBSCRIPTIONS
+main : Program Never Model Msg
+main =
+    Html.program
+        { init = ( model, Cmd.none )
+        , view = view
+        , subscriptions = always Sub.none
+        , update = update
+        }
